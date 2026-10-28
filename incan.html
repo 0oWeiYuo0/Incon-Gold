@@ -103,6 +103,7 @@
       <button id="leaveBtn" class="secondary">離開房間</button>
     </div>
     <p id="roomMsg" class="msg"></p>
+    <p id="debug" class="small center"></p>
   </section>
 </main>
 
@@ -113,7 +114,7 @@ import { getDatabase, ref, onValue, runTransaction, get, set, update } from "htt
 import {
   MIN_PLAYERS, MAX_PLAYERS, ROUNDS, HAZARD_NAMES,
   parseCard, splitList, stateFromDb, newGame, resolveTurn, dbUpdates, ranking,
-} from "./incan-logic.js";
+} from "./incan-logic.js?v=3";   // 改規則時把 v 的數字加 1，避免瀏覽器用到舊檔案
 
 // ===== Firebase 設定（和井字遊戲相同） =====
 const firebaseConfig = {
@@ -275,6 +276,7 @@ function render() {
   }
 
   const players = s.players || {};
+  $("debug").textContent = "v3 · " + s.phase + " · 第" + s.turn + "回合 · 已選 " + Object.keys(s.ready || {}).length + "/" + (s.needed || 0);
   const list = Object.entries(players)
     .map(([id, p]) => ({ id, ...p }))
     .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
@@ -443,6 +445,7 @@ function maybeResolve() {
 
 async function hostResolve() {
   busy = true;
+  let done = false;
   const msg = $("roomMsg");
   try {
     // 先把狀態切成 reveal，伺服器確認後，規則才允許大家讀取秘密選擇
@@ -459,12 +462,16 @@ async function hostResolve() {
       return;
     }
     const out = resolveTurn(cur, deck, choices);
+    out.state.phase = out.state.phase === "over" ? "over" : "play";   // 一定要從 reveal 切回 play
     await update(ref(db), dbUpdates(code, out.state, out.deck));
+    done = true;
   } catch (err) {
     msg.textContent = "結算失敗：" + (err.code || err.message);
   } finally {
     busy = false;
   }
+  // 結算期間可能又有人選好了（例如洞穴裡只剩房主一人），結算完要再檢查一次
+  if (done) maybeResolve();
 }
 
 $("createBtn").addEventListener("click", createRoom);
