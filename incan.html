@@ -289,7 +289,8 @@ function render() {
   else $("roundInfo").textContent = "第 " + s.round + " / " + ROUNDS + " 輪 · 第 " + s.turn + " 回合";
 
   // --- 路徑 ---
-  const showPath = phase === "play";
+  const playing = phase === "play" || phase === "reveal";   // reveal = 房主正在結算的瞬間
+  const showPath = playing;
   $("pathWrap").hidden = !showPath;
   if (showPath) {
     const cards = splitList(s.path);
@@ -311,7 +312,7 @@ function render() {
       row.appendChild(el("div", "stat", "💎 " + p.hand + "　⛺ " + p.tent + "　🏺 " + p.artifacts));
     }
 
-    if (phase === "play") {
+    if (playing) {
       let st;
       if (!p.inCave) st = "已回到營地";
       else if (ready[p.id] === s.turn) st = "已做出選擇 ✔";
@@ -335,8 +336,10 @@ function render() {
     } else {
       actions.appendChild(el("p", "hint", "等待房主開始遊戲…（目前 " + n + " 人）"));
     }
-  } else if (phase === "play") {
-    if (!me) {
+  } else if (playing) {
+    if (phase === "reveal") {
+      actions.appendChild(el("p", "hint", "大家都選好了，結算中…"));
+    } else if (!me) {
       actions.appendChild(el("p", "hint", "你是旁觀者。"));
     } else if (!me.inCave) {
       actions.appendChild(el("p", "hint", "你已回到營地，等待本輪結束…"));
@@ -431,9 +434,10 @@ async function startGame() {
 // ===== 房主：所有人選完後結算這個回合 =====
 function maybeResolve() {
   const s = lastState;
-  if (!s || s.host !== uid || s.phase !== "play" || busy) return;
-  if (!(s.needed > 0)) return;
-  if (Object.keys(s.ready || {}).length < s.needed) return;
+  if (!s || s.host !== uid || busy) return;
+  if (s.phase === "reveal") { hostResolve(); return; }              // 上次結算到一半（例如房主重新整理）
+  if (s.phase !== "play" || !(s.needed > 0)) return;
+  if (Object.keys(s.ready || {}).length < s.needed) return;         // 還有人沒選
   hostResolve();
 }
 
@@ -441,7 +445,9 @@ async function hostResolve() {
   busy = true;
   const msg = $("roomMsg");
   try {
-    const choicesSnap = await get(ref(db, "incanChoices/" + code));   // 全部選完後規則才允許讀
+    // 先把狀態切成 reveal，伺服器確認後，規則才允許大家讀取秘密選擇
+    if (lastState.phase !== "reveal") await set(ref(db, "incan/" + code + "/phase"), "reveal");
+    const choicesSnap = await get(ref(db, "incanChoices/" + code));
     const deckSnap = await get(ref(db, "incanSecret/" + code + "/deck"));
     const choices = choicesSnap.val() || {};
     const deck = splitList(deckSnap.val());
