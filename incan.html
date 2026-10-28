@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>印加寶藏</title>
+<style>
+  :root { --bg:#f5f5f7; --fg:#1d1d1f; --card:#fff; --accent:#2f6fed; --warn:#d6336c; --line:#d0d0d5; --gold:#e8a317; --danger:#e03131; --art:#7048e8; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16171a; --fg:#f0f0f3; --card:#23252a; --accent:#6c9cff; --warn:#ff7aa8; --line:#3a3d44; --gold:#ffc53d; --danger:#ff8787; --art:#b197fc; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Noto Sans TC", sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width: 560px; margin: 0 auto; padding: 20px 14px 48px; }
+  h1 { font-size: 1.5rem; margin: 6px 0 16px; text-align:center; }
+  h3 { margin: 18px 0 8px; font-size: 1rem; }
+  section { background: var(--card); border-radius: 16px; padding: 18px; }
+  button { font: inherit; padding: 10px 18px; border: 0; border-radius: 10px; background: var(--accent); color:#fff; cursor:pointer; }
+  button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+  button.big { padding: 14px 22px; font-size: 1.05rem; flex: 1; }
+  button.go { background: #2f9e44; }
+  button.back { background: #e8590c; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .row { display:flex; gap:8px; justify-content:center; margin-top:14px; flex-wrap:wrap; }
+  input { font: inherit; padding: 10px; text-align:center; border:1px solid var(--line); border-radius:10px; background:transparent; color:var(--fg); }
+  #nameInput { width: 100%; }
+  #codeInput { width: 7em; text-transform: uppercase; letter-spacing: .2em; }
+  .center { text-align:center; }
+  .msg { min-height: 1.4em; color: var(--warn); margin: 12px 0 0; text-align:center; }
+  .small { font-size: .85rem; opacity: .7; }
+  .topbar { display:flex; justify-content:space-between; align-items:baseline; gap:8px; flex-wrap:wrap; }
+  #roomCode { font-size: 1.3rem; letter-spacing: .25em; }
+  #roundInfo { font-weight: 600; }
+  #path { display:flex; flex-wrap:wrap; }
+  .card { min-width: 70px; padding: 10px 8px; margin: 4px; border-radius: 10px; font-weight: 700; text-align:center; background: var(--bg); border: 2px solid var(--line); }
+  .card.treasure { border-color: var(--gold); }
+  .card.hazard { border-color: var(--danger); }
+  .card.artifact { border-color: var(--art); }
+  .card.latest { box-shadow: 0 0 0 3px var(--accent); }
+  .player { display:grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 10px 12px; margin: 6px 0; border: 1px solid var(--line); border-radius: 12px; }
+  .player.me { border-color: var(--accent); }
+  .player .name { font-weight: 600; }
+  .player .stat { text-align:right; }
+  .player .state { grid-column: 1 / -1; font-size: .85rem; opacity: .75; }
+  .tag { font-size: .7rem; padding: 1px 6px; margin-left: 4px; border-radius: 6px; background: var(--accent); color:#fff; vertical-align: middle; }
+  #actions { margin-top: 14px; text-align:center; }
+  #actions .hint { margin: 0 0 10px; }
+  .rank { text-align:left; margin: 8px auto; max-width: 360px; padding-left: 1.5em; }
+  pre { white-space: pre-wrap; margin: 0; font-family: inherit; font-size: .92rem; line-height: 1.5; }
+  details { margin-top: 14px; font-size: .9rem; }
+  details p { margin: 6px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🏺 印加寶藏</h1>
+
+  <section id="lobby">
+    <label class="small">你的暱稱</label>
+    <input id="nameInput" maxlength="12" placeholder="暱稱（最多 12 字）" autocomplete="off">
+    <div class="row"><button id="createBtn" disabled>建立房間</button></div>
+    <div class="row">
+      <input id="codeInput" maxlength="4" placeholder="代碼" autocomplete="off">
+      <button id="joinBtn" class="secondary" disabled>加入房間</button>
+    </div>
+    <p id="lobbyMsg" class="msg"></p>
+    <p class="small center">一人建立房間，把 4 個字母的代碼給朋友。2～8 人。</p>
+    <details>
+      <summary>規則簡介</summary>
+      <p>共 5 輪。每回合先翻開一張牌，然後所有還在洞穴的人<b>同時、秘密地</b>選「繼續探險」或「回營地」，大家都選完才一起公開。</p>
+      <p>💎 寶石牌：在洞穴的人平分，除不盡的留在路上。</p>
+      <p>⚠️ 危險牌：同一種危險出現第二張時，還在洞穴的人手上的寶石全部掉光，本輪結束。</p>
+      <p>⛺ 回營地：把手上的寶石存進帳篷，並平分路上剩下的寶石。<b>只有一個人回營時</b>，才能帶走路上的神器。</p>
+      <p>5 輪後，帳篷裡分數最高的人獲勝。</p>
+    </details>
+  </section>
+
+  <section id="room" hidden>
+    <div class="topbar">
+      <span>房間 <strong id="roomCode"></strong></span>
+      <span id="roundInfo"></span>
+    </div>
+
+    <div id="pathWrap" hidden>
+      <h3>探險路徑</h3>
+      <div id="path"></div>
+      <p id="pathGems" class="small"></p>
+    </div>
+
+    <div id="actions"></div>
+
+    <h3>玩家</h3>
+    <div id="players"></div>
+
+    <div id="logWrap" hidden>
+      <h3 id="logTitle">上一回合</h3>
+      <p id="logChoices" class="small"></p>
+      <pre id="log"></pre>
+    </div>
+
+    <div class="row">
+      <button id="startBtn" hidden></button>
+      <button id="leaveBtn" class="secondary">離開房間</button>
+    </div>
+    <p id="roomMsg" class="msg"></p>
+  </section>
+</main>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import { getDatabase, ref, onValue, runTransaction, get, set, update } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
+import {
+  MIN_PLAYERS, MAX_PLAYERS, ROUNDS, HAZARD_NAMES,
+  parseCard, splitList, stateFromDb, newGame, resolveTurn, dbUpdates, ranking,
+} from "./incan-logic.js";
+
+// ===== Firebase 設定（和井字遊戲相同） =====
+const firebaseConfig = {
+  apiKey: "AIzaSyDb2OjF4VCER-Rnl4x0VXplhwYFybzFwaU",
+  authDomain: "incan-gold-d1eff.firebaseapp.com",
+  databaseURL: "https://incan-gold-d1eff-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "incan-gold-d1eff",
+  storageBucket: "incan-gold-d1eff.firebasestorage.app",
+  messagingSenderId: "969662195942",
+  appId: "1:969662195942:web:a92d0e875e81bcfc3bf327"
+};
+
+const app  = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db   = getDatabase(app);
+
+const $ = (id) => document.getElementById(id);
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+const HAZARD_ICONS = { snake: "🐍", spider: "🕷️", rockfall: "🪨", fire: "🔥", mummy: "🧟" };
+const LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+
+let uid = null;
+let code = null;
+let unsubscribe = null;
+let lastState = null;      // 資料庫裡 incan/<code> 的最新內容
+let busy = false;          // 房主正在結算時不重複結算
+let myChoice = null;       // { turn, value }：我這回合選了什麼（只存在自己的瀏覽器）
+
+// 記住暱稱（存不了也沒關係）
+try { $("nameInput").value = localStorage.getItem("incanName") || ""; } catch (e) {}
+function getName() {
+  const n = $("nameInput").value.trim().slice(0, 12) || "玩家";
+  try { localStorage.setItem("incanName", n); } catch (e) {}
+  return n;
+}
+const newPlayer = (name, order) => ({ name, order, tent: 0, artifacts: 0, hand: 0, inCave: true });
+
+// ===== 匿名登入 =====
+signInAnonymously(auth)
+  .then((cred) => {
+    uid = cred.user.uid;
+    $("createBtn").disabled = false;
+    $("joinBtn").disabled = false;
+  })
+  .catch((err) => {
+    $("lobbyMsg").textContent = "登入失敗：" + err.code + "（請確認已啟用匿名登入）";
+  });
+
+function randomCode() {
+  let s = "";
+  for (let i = 0; i < 4; i++) s += LETTERS[Math.floor(Math.random() * LETTERS.length)];
+  return s;
+}
+
+// ===== 建立 / 加入房間 =====
+async function createRoom() {
+  $("lobbyMsg").textContent = "";
+  const name = getName();
+  for (let i = 0; i < 5; i++) {
+    const c = randomCode();
+    try {
+      const result = await runTransaction(ref(db, "incan/" + c), (cur) => {
+        if (cur) return;   // 代碼已被使用
+        return {
+          host: uid, phase: "lobby", round: 0, turn: 0, needed: 0,
+          path: "", pathGems: 0, removed: "",
+          players: { [uid]: newPlayer(name, 1) },
+          createdAt: Date.now(),
+        };
+      });
+      if (result.committed) { enterRoom(c); return; }
+    } catch (err) {
+      // 代碼剛好重複時會被規則擋下，換一組再試
+    }
+  }
+  $("lobbyMsg").textContent = "建立失敗，請再試一次。";
+}
+
+async function joinRoom() {
+  const c = $("codeInput").value.trim().toUpperCase();
+  if (!/^[A-Z]{4}$/.test(c)) { $("lobbyMsg").textContent = "請輸入 4 個英文字母的代碼。"; return; }
+  $("lobbyMsg").textContent = "";
+  const name = getName();
+
+  try {
+    const snap = await get(ref(db, "incan/" + c));
+    if (!snap.exists()) { $("lobbyMsg").textContent = "找不到這個房間。"; return; }
+
+    const v = snap.val();
+    const players = v.players || {};
+    if (players[uid]) { enterRoom(c); return; }                 // 重新連線
+    if (v.phase !== "lobby") { $("lobbyMsg").textContent = "遊戲已經開始，不能中途加入。"; return; }
+    const n = Object.keys(players).length;
+    if (n >= MAX_PLAYERS) { $("lobbyMsg").textContent = "房間已滿（最多 " + MAX_PLAYERS + " 人）。"; return; }
+
+    await set(ref(db, "incan/" + c + "/players/" + uid), newPlayer(name, n + 1));
+    enterRoom(c);
+  } catch (err) {
+    $("lobbyMsg").textContent = "加入失敗：" + (err.code || err.message);
+  }
+}
+
+// ===== 進入房間並監聽 =====
+function enterRoom(c) {
+  code = c;
+  myChoice = null;
+  $("lobby").hidden = true;
+  $("room").hidden = false;
+  $("roomCode").textContent = c;
+  $("roomMsg").textContent = "";
+  if (unsubscribe) unsubscribe();
+  unsubscribe = onValue(ref(db, "incan/" + c), (snap) => {
+    lastState = snap.val();
+    render();
+    maybeResolve();
+  }, (err) => {
+    $("roomMsg").textContent = "讀取失敗：" + (err.code || err.message);
+  });
+}
+
+function leaveRoom() {
+  if (unsubscribe) unsubscribe();
+  unsubscribe = null; code = null; lastState = null; myChoice = null;
+  $("room").hidden = true;
+  $("lobby").hidden = false;
+  $("codeInput").value = "";
+}
+
+// ===== 畫面 =====
+function cardEl(cardCode, latest) {
+  const c = parseCard(cardCode);
+  let d;
+  if (c.type === "T") { d = el("div", "card treasure", "💎 " + c.value); }
+  else if (c.type === "A") { d = el("div", "card artifact", "🏺 " + c.value + " 分"); }
+  else { d = el("div", "card hazard", (HAZARD_ICONS[c.kind] || "⚠️") + " " + (HAZARD_NAMES[c.kind] || c.kind)); }
+  if (latest) d.classList.add("latest");
+  return d;
+}
+
+function render() {
+  const s = lastState;
+  const actions = $("actions");
+  actions.textContent = "";
+  $("players").textContent = "";
+  $("path").textContent = "";
+
+  if (!s) {
+    $("roundInfo").textContent = "";
+    $("pathWrap").hidden = true;
+    $("logWrap").hidden = true;
+    $("startBtn").hidden = true;
+    actions.appendChild(el("p", "", "房間不存在或已被刪除。"));
+    return;
+  }
+
+  const players = s.players || {};
+  const list = Object.entries(players)
+    .map(([id, p]) => ({ id, ...p }))
+    .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+  const me = players[uid] || null;
+  const isHost = s.host === uid;
+  const ready = s.ready || {};
+  const phase = s.phase;
+
+  // --- 標題列 ---
+  if (phase === "lobby") $("roundInfo").textContent = "等待玩家加入";
+  else if (phase === "over") $("roundInfo").textContent = "遊戲結束";
+  else $("roundInfo").textContent = "第 " + s.round + " / " + ROUNDS + " 輪 · 第 " + s.turn + " 回合";
+
+  // --- 路徑 ---
+  const showPath = phase === "play";
+  $("pathWrap").hidden = !showPath;
+  if (showPath) {
+    const cards = splitList(s.path);
+    cards.forEach((c, i) => $("path").appendChild(cardEl(c, i === cards.length - 1)));
+    $("pathGems").textContent = "路上剩餘寶石：" + (s.pathGems || 0) + " 顆（回營的人會平分）";
+  }
+
+  // --- 玩家列表 ---
+  for (const p of list) {
+    const row = el("div", "player" + (p.id === uid ? " me" : ""));
+    const nameEl = el("div", "name", p.name);
+    if (p.id === s.host) nameEl.appendChild(el("span", "tag", "房主"));
+    if (p.id === uid) nameEl.appendChild(el("span", "tag", "你"));
+    row.appendChild(nameEl);
+
+    if (phase === "lobby") {
+      row.appendChild(el("div", "stat", ""));
+    } else {
+      row.appendChild(el("div", "stat", "💎 " + p.hand + "　⛺ " + p.tent + "　🏺 " + p.artifacts));
+    }
+
+    if (phase === "play") {
+      let st;
+      if (!p.inCave) st = "已回到營地";
+      else if (ready[p.id] === s.turn) st = "已做出選擇 ✔";
+      else st = "思考中…";
+      row.appendChild(el("div", "state", st));
+    }
+    $("players").appendChild(row);
+  }
+
+  // --- 操作區 ---
+  const startBtn = $("startBtn");
+  startBtn.hidden = true;
+
+  if (phase === "lobby") {
+    const n = list.length;
+    if (isHost) {
+      actions.appendChild(el("p", "hint", "目前 " + n + " 人。把房間代碼 " + code + " 傳給朋友，人到齊後按「開始遊戲」。"));
+      startBtn.hidden = false;
+      startBtn.textContent = "開始遊戲";
+      startBtn.disabled = n < MIN_PLAYERS;
+    } else {
+      actions.appendChild(el("p", "hint", "等待房主開始遊戲…（目前 " + n + " 人）"));
+    }
+  } else if (phase === "play") {
+    if (!me) {
+      actions.appendChild(el("p", "hint", "你是旁觀者。"));
+    } else if (!me.inCave) {
+      actions.appendChild(el("p", "hint", "你已回到營地，等待本輪結束…"));
+    } else if (ready[uid] === s.turn) {
+      const picked = myChoice && myChoice.turn === s.turn ? (myChoice.value === "leave" ? "回營地" : "繼續探險") : "";
+      actions.appendChild(el("p", "hint", (picked ? "你選了「" + picked + "」。" : "你已做出選擇。") + "等待其他人…"));
+    } else {
+      actions.appendChild(el("p", "hint", "你手上有 " + me.hand + " 顆寶石。要冒險繼續，還是回營地？"));
+      const row = el("div", "row");
+      const goBtn = el("button", "big go", "🔥 繼續探險");
+      const backBtn = el("button", "big back", "⛺ 回營地");
+      goBtn.addEventListener("click", () => sendChoice("stay"));
+      backBtn.addEventListener("click", () => sendChoice("leave"));
+      row.appendChild(goBtn);
+      row.appendChild(backBtn);
+      actions.appendChild(row);
+    }
+  } else if (phase === "over") {
+    const rk = ranking(stateFromDb(s));
+    actions.appendChild(el("h3", "", "🏆 最終排名"));
+    const ol = el("ol", "rank");
+    rk.forEach((p) => {
+      const li = el("li", "", p.name + "：" + p.tent + " 分（神器 " + p.artifacts + " 件）");
+      ol.appendChild(li);
+    });
+    actions.appendChild(ol);
+    if (isHost) {
+      startBtn.hidden = false;
+      startBtn.textContent = "再玩一局";
+      startBtn.disabled = false;
+    } else {
+      actions.appendChild(el("p", "hint", "等待房主開始下一局…"));
+    }
+  }
+
+  // --- 上一回合的紀錄 ---
+  const rv = s.reveal;
+  if (rv && rv.log) {
+    $("logWrap").hidden = false;
+    $("logTitle").textContent = rv.turn ? "第 " + rv.turn + " 回合的結果" : "遊戲開始";
+    if (rv.choices) {
+      const parts = Object.entries(rv.choices).map(([id, v]) => {
+        const nm = players[id] ? players[id].name : "?";
+        return nm + "：" + (v === "leave" ? "回營" : "繼續");
+      });
+      $("logChoices").textContent = "大家的選擇 → " + parts.join("　");
+    } else {
+      $("logChoices").textContent = "";
+    }
+    $("log").textContent = rv.log;
+  } else {
+    $("logWrap").hidden = true;
+  }
+}
+
+// ===== 玩家：送出秘密選擇 =====
+async function sendChoice(value) {
+  const s = lastState;
+  if (!s) return;
+  const msg = $("roomMsg");
+  msg.textContent = "";
+  try {
+    const updates = {};
+    updates["incanChoices/" + code + "/" + uid] = value;   // 秘密：大家選完前別人讀不到
+    updates["incan/" + code + "/ready/" + uid] = s.turn;    // 公開：只標示「我選好了」
+    await update(ref(db), updates);
+    myChoice = { turn: s.turn, value };
+    render();
+  } catch (err) {
+    msg.textContent = "送出失敗：" + (err.code || err.message);
+  }
+}
+
+// ===== 房主：開始遊戲 / 再玩一局 =====
+async function startGame() {
+  const s = lastState;
+  if (!s || s.host !== uid) return;
+  const msg = $("roomMsg");
+  msg.textContent = "";
+  const info = {};
+  for (const [id, p] of Object.entries(s.players || {})) info[id] = { name: p.name, order: p.order };
+  if (Object.keys(info).length < MIN_PLAYERS) { msg.textContent = "至少需要 " + MIN_PLAYERS + " 位玩家。"; return; }
+  try {
+    const { state, deck } = newGame(info);
+    myChoice = null;
+    await update(ref(db), dbUpdates(code, state, deck));
+  } catch (err) {
+    msg.textContent = "開始失敗：" + (err.code || err.message);
+  }
+}
+
+// ===== 房主：所有人選完後結算這個回合 =====
+function maybeResolve() {
+  const s = lastState;
+  if (!s || s.host !== uid || s.phase !== "play" || busy) return;
+  if (!(s.needed > 0)) return;
+  if (Object.keys(s.ready || {}).length < s.needed) return;
+  hostResolve();
+}
+
+async function hostResolve() {
+  busy = true;
+  const msg = $("roomMsg");
+  try {
+    const choicesSnap = await get(ref(db, "incanChoices/" + code));   // 全部選完後規則才允許讀
+    const deckSnap = await get(ref(db, "incanSecret/" + code + "/deck"));
+    const choices = choicesSnap.val() || {};
+    const deck = splitList(deckSnap.val());
+    const cur = stateFromDb(lastState);
+    const out = resolveTurn(cur, deck, choices);
+    await update(ref(db), dbUpdates(code, out.state, out.deck));
+  } catch (err) {
+    msg.textContent = "結算失敗：" + (err.code || err.message);
+  } finally {
+    busy = false;
+  }
+}
+
+$("createBtn").addEventListener("click", createRoom);
+$("joinBtn").addEventListener("click", joinRoom);
+$("codeInput").addEventListener("keydown", (e) => { if (e.key === "Enter") joinRoom(); });
+$("startBtn").addEventListener("click", startGame);
+$("leaveBtn").addEventListener("click", leaveRoom);
+</script>
+</body>
+</html>
