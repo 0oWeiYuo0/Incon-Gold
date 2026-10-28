@@ -61,7 +61,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import { getDatabase, ref, onValue, runTransaction } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
+import { getDatabase, ref, onValue, runTransaction, get, set } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
 
 // ===== Firebase 設定（請對照你的 Firebase 控制台確認每個字元） =====
 const firebaseConfig = {
@@ -119,11 +119,15 @@ async function createRoom() {
   $("lobbyMsg").textContent = "";
   for (let i = 0; i < 5; i++) {
     const code = randomCode();
-    const result = await runTransaction(ref(db, "rooms/" + code), (cur) => {
-      if (cur) return;                       // 已有人用這組代碼，放棄
-      return { board: ".........", turn: "X", winner: "", players: { X: uid }, createdAt: Date.now() };
-    });
-    if (result.committed) { enterRoom(code); return; }
+    try {
+      const result = await runTransaction(ref(db, "rooms/" + code), (cur) => {
+        if (cur) return;                       // 已有人用這組代碼，放棄
+        return { board: ".........", turn: "X", winner: "", players: { X: uid }, createdAt: Date.now() };
+      });
+      if (result.committed) { enterRoom(code); return; }
+    } catch (err) {
+      // 代碼剛好重複時可能被規則擋下，換一組代碼再試
+    }
   }
   $("lobbyMsg").textContent = "建立失敗，請再試一次。";
 }
@@ -133,20 +137,19 @@ async function joinRoom() {
   if (!/^[A-Z]{4}$/.test(code)) { $("lobbyMsg").textContent = "請輸入 4 個英文字母的代碼。"; return; }
   $("lobbyMsg").textContent = "";
 
-  let failReason = "";
-  const result = await runTransaction(ref(db, "rooms/" + code), (cur) => {
-    failReason = "";
-    if (cur === null) return cur;            // 本機還沒有資料，交給伺服器重試
-    const p = cur.players || {};
-    if (p.X === uid || p.O === uid) return cur;           // 本來就在房間（重新連線）
-    if (!p.O) { cur.players = { ...p, O: uid }; return cur; }
-    failReason = "房間已滿。";
-    return;
-  });
+  try {
+    const snap = await get(ref(db, "rooms/" + code));
+    if (!snap.exists()) { $("lobbyMsg").textContent = "找不到這個房間。"; return; }
 
-  if (!result.committed) { $("lobbyMsg").textContent = failReason || "加入失敗。"; return; }
-  if (result.snapshot.val() === null) { $("lobbyMsg").textContent = "找不到這個房間。"; return; }
-  enterRoom(code);
+    const p = snap.val().players || {};
+    if (p.X === uid || p.O === uid) { enterRoom(code); return; }   // 本來就在房間（重新連線）
+    if (p.O) { $("lobbyMsg").textContent = "房間已滿。"; return; }
+
+    await set(ref(db, "rooms/" + code + "/players/O"), uid);       // 佔下 O 的位置
+    enterRoom(code);
+  } catch (err) {
+    $("lobbyMsg").textContent = "加入失敗（房間可能已滿）：" + (err.code || err.message);
+  }
 }
 
 // ===== 進入房間並監聽 =====
