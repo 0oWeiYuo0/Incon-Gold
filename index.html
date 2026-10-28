@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>線上井字遊戲</title>
+<style>
+  :root { --bg:#f5f5f7; --fg:#1d1d1f; --card:#fff; --accent:#2f6fed; --x:#d6336c; --o:#1c7ed6; --line:#d0d0d5; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16171a; --fg:#f0f0f3; --card:#23252a; --accent:#6c9cff; --x:#ff7aa8; --o:#74b9ff; --line:#3a3d44; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Noto Sans TC", sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width: 420px; margin: 0 auto; padding: 24px 16px 48px; text-align:center; }
+  h1 { font-size: 1.5rem; margin: 8px 0 20px; }
+  section { background: var(--card); border-radius: 16px; padding: 20px; }
+  button { font: inherit; padding: 10px 18px; border: 0; border-radius: 10px; background: var(--accent); color:#fff; cursor:pointer; }
+  button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .row { display:flex; gap:8px; justify-content:center; margin-top:14px; }
+  input { font: inherit; width: 8em; padding: 10px; text-align:center; text-transform: uppercase; letter-spacing: .2em; border:1px solid var(--line); border-radius:10px; background:transparent; color:var(--fg); }
+  #board { display:grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 16px auto; max-width: 300px; }
+  .cell { aspect-ratio: 1; font-size: 2.6rem; font-weight: 700; background: var(--bg); color: var(--fg); border-radius: 12px; padding: 0; }
+  .cell.X { color: var(--x); }
+  .cell.O { color: var(--o); }
+  .cell:disabled { opacity: 1; cursor: default; }
+  .cell.win { outline: 3px solid var(--accent); }
+  #status { font-weight: 600; min-height: 1.5em; }
+  #roomCode { font-size: 1.6rem; letter-spacing: .25em; }
+  .msg { min-height: 1.4em; color: var(--x); margin: 12px 0 0; }
+  .small { font-size: .85rem; opacity: .7; }
+</style>
+</head>
+<body>
+<main>
+  <h1>線上井字遊戲</h1>
+
+  <section id="lobby">
+    <button id="createBtn" disabled>建立房間</button>
+    <div class="row">
+      <input id="codeInput" maxlength="4" placeholder="代碼" autocomplete="off">
+      <button id="joinBtn" class="secondary" disabled>加入房間</button>
+    </div>
+    <p id="lobbyMsg" class="msg"></p>
+    <p class="small">一人建立房間，把 4 個字母的代碼給對方，對方輸入後即可開始。</p>
+  </section>
+
+  <section id="game" hidden>
+    <div class="small">房間代碼</div>
+    <div id="roomCode"></div>
+    <p id="me" class="small"></p>
+    <p id="status"></p>
+    <div id="board"></div>
+    <div class="row">
+      <button id="restartBtn" hidden>再來一局</button>
+      <button id="leaveBtn" class="secondary">離開房間</button>
+    </div>
+  </section>
+</main>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import { getDatabase, ref, onValue, runTransaction } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
+
+// ===== Firebase 設定（請對照你的 Firebase 控制台確認每個字元） =====
+const firebaseConfig = {
+  apiKey: "AIzaSyDb2OjF4VCER-Rnl4x0VXplhwYFybzFwaU",
+  authDomain: "incan-gold-d1eff.firebaseapp.com",
+  databaseURL: "https://incan-gold-d1eff-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "incan-gold-d1eff",
+  storageBucket: "incan-gold-d1eff.firebasestorage.app",
+  messagingSenderId: "969662195942",
+  appId: "1:969662195942:web:a92d0e875e81bcfc3bf327"
+};
+
+const app  = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db   = getDatabase(app);
+
+const $ = (id) => document.getElementById(id);
+const LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+const LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+
+let uid = null;
+let roomCode = null;
+let unsubscribe = null;
+let lastState = null;
+
+// ===== 匿名登入 =====
+signInAnonymously(auth)
+  .then((cred) => {
+    uid = cred.user.uid;
+    $("createBtn").disabled = false;
+    $("joinBtn").disabled = false;
+  })
+  .catch((err) => {
+    $("lobbyMsg").textContent = "登入失敗：" + err.code + "（請確認已啟用匿名登入）";
+  });
+
+// ===== 遊戲邏輯 =====
+function findWinner(board) {
+  for (const [a, b, c] of LINES) {
+    if (board[a] !== "." && board[a] === board[b] && board[a] === board[c]) {
+      return { who: board[a], line: [a, b, c] };
+    }
+  }
+  return board.includes(".") ? null : { who: "D", line: [] };
+}
+
+function randomCode() {
+  let s = "";
+  for (let i = 0; i < 4; i++) s += LETTERS[Math.floor(Math.random() * LETTERS.length)];
+  return s;
+}
+
+// ===== 建立 / 加入房間 =====
+async function createRoom() {
+  $("lobbyMsg").textContent = "";
+  for (let i = 0; i < 5; i++) {
+    const code = randomCode();
+    const result = await runTransaction(ref(db, "rooms/" + code), (cur) => {
+      if (cur) return;                       // 已有人用這組代碼，放棄
+      return { board: ".........", turn: "X", winner: "", players: { X: uid }, createdAt: Date.now() };
+    });
+    if (result.committed) { enterRoom(code); return; }
+  }
+  $("lobbyMsg").textContent = "建立失敗，請再試一次。";
+}
+
+async function joinRoom() {
+  const code = $("codeInput").value.trim().toUpperCase();
+  if (!/^[A-Z]{4}$/.test(code)) { $("lobbyMsg").textContent = "請輸入 4 個英文字母的代碼。"; return; }
+  $("lobbyMsg").textContent = "";
+
+  let failReason = "";
+  const result = await runTransaction(ref(db, "rooms/" + code), (cur) => {
+    failReason = "";
+    if (cur === null) return cur;            // 本機還沒有資料，交給伺服器重試
+    const p = cur.players || {};
+    if (p.X === uid || p.O === uid) return cur;           // 本來就在房間（重新連線）
+    if (!p.O) { cur.players = { ...p, O: uid }; return cur; }
+    failReason = "房間已滿。";
+    return;
+  });
+
+  if (!result.committed) { $("lobbyMsg").textContent = failReason || "加入失敗。"; return; }
+  if (result.snapshot.val() === null) { $("lobbyMsg").textContent = "找不到這個房間。"; return; }
+  enterRoom(code);
+}
+
+// ===== 進入房間並監聽 =====
+function enterRoom(code) {
+  roomCode = code;
+  $("lobby").hidden = true;
+  $("game").hidden = false;
+  $("roomCode").textContent = code;
+  if (unsubscribe) unsubscribe();
+  unsubscribe = onValue(ref(db, "rooms/" + code), (snap) => {
+    lastState = snap.val();
+    render();
+  });
+}
+
+function leaveRoom() {
+  if (unsubscribe) unsubscribe();
+  unsubscribe = null; roomCode = null; lastState = null;
+  $("game").hidden = true;
+  $("lobby").hidden = false;
+  $("codeInput").value = "";
+}
+
+// ===== 畫面 =====
+function mySymbol(s) {
+  if (!s || !s.players) return null;
+  if (s.players.X === uid) return "X";
+  if (s.players.O === uid) return "O";
+  return null;
+}
+
+function render() {
+  const s = lastState;
+  const boardEl = $("board");
+  boardEl.textContent = "";
+  if (!s) { $("status").textContent = "房間不存在或已被刪除。"; return; }
+
+  const me = mySymbol(s);
+  const hasOpponent = !!(s.players && s.players.O);
+  const result = findWinner(s.board);
+  const winLine = result ? result.line : [];
+
+  $("me").textContent = me ? "你是 " + me : "你是旁觀者";
+
+  for (let i = 0; i < 9; i++) {
+    const ch = s.board[i];
+    const btn = document.createElement("button");
+    btn.className = "cell" + (ch !== "." ? " " + ch : "") + (winLine.includes(i) ? " win" : "");
+    btn.textContent = ch === "." ? "" : ch;
+    btn.disabled = !(me && hasOpponent && !s.winner && s.turn === me && ch === ".");
+    btn.addEventListener("click", () => play(i));
+    boardEl.appendChild(btn);
+  }
+
+  let text;
+  if (!hasOpponent) text = "等待對手加入…把代碼給朋友";
+  else if (s.winner === "D") text = "平手！";
+  else if (s.winner) text = s.winner === me ? "你贏了！🎉" : "你輸了";
+  else text = s.turn === me ? "輪到你了（" + me + "）" : "等待對手下棋…";
+  $("status").textContent = text;
+
+  $("restartBtn").hidden = !(me && s.winner);
+}
+
+// ===== 下棋 / 重新開始（都用 transaction，避免兩邊同時寫入互相覆蓋） =====
+function play(i) {
+  runTransaction(ref(db, "rooms/" + roomCode), (cur) => {
+    if (!cur || cur.winner) return;
+    const me = cur.players && cur.players.X === uid ? "X" : (cur.players && cur.players.O === uid ? "O" : null);
+    if (!me || !cur.players.O || cur.turn !== me || cur.board[i] !== ".") return;
+
+    cur.board = cur.board.slice(0, i) + me + cur.board.slice(i + 1);
+    const r = findWinner(cur.board);
+    if (r) cur.winner = r.who;
+    else cur.turn = me === "X" ? "O" : "X";
+    return cur;
+  });
+}
+
+function restart() {
+  runTransaction(ref(db, "rooms/" + roomCode), (cur) => {
+    if (!cur || !cur.winner) return;
+    cur.board = ".........";
+    cur.winner = "";
+    cur.turn = "X";
+    return cur;
+  });
+}
+
+$("createBtn").addEventListener("click", createRoom);
+$("joinBtn").addEventListener("click", joinRoom);
+$("codeInput").addEventListener("keydown", (e) => { if (e.key === "Enter") joinRoom(); });
+$("restartBtn").addEventListener("click", restart);
+$("leaveBtn").addEventListener("click", leaveRoom);
+</script>
+</body>
+</html>
