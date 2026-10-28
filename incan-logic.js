@@ -208,7 +208,9 @@ export function stateFromDb(v) {
     };
   }
   return {
-    phase: v.phase, round: v.round || 0, turn: v.turn || 0, needed: v.needed || 0,
+    // "reveal" 只是房主結算時在資料庫裡暫時用的標記，遊戲本身仍然是 "play"
+    phase: v.phase === "reveal" ? "play" : v.phase,
+    round: v.round || 0, turn: v.turn || 0, needed: v.needed || 0,
     path: splitList(v.path), pathGems: v.pathGems || 0, removed: splitList(v.removed),
     players, reveal: v.reveal || null,
   };

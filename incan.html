@@ -452,6 +452,12 @@ async function hostResolve() {
     const choices = choicesSnap.val() || {};
     const deck = splitList(deckSnap.val());
     const cur = stateFromDb(lastState);
+
+    // 選擇不齊全（例如先前結算到一半就中斷）→ 不結算，直接把狀態還原成 play，讓大家重新選
+    if (Object.keys(choices).length < cur.needed) {
+      await set(ref(db, "incan/" + code + "/phase"), "play");
+      return;
+    }
     const out = resolveTurn(cur, deck, choices);
     await update(ref(db), dbUpdates(code, out.state, out.deck));
   } catch (err) {
